@@ -1,0 +1,9 @@
+; format: name=value||start||step||stop||optimize(Y/N)
+; saved by MT5 as UTF-16LE with BOM - this example is ASCII, both work
+InpLots=0.01||0.01||0.01||1.0||N
+InpStopPoints=25.0||15.0||5.0||40.0||N
+InpTakePoints=50.0||20.0||10.0||80.0||N
+InpUseTrailing=true||false||0||true||N
+InpMagicNumber=15001||15001||1||15001||N
+InpStartHour=14||13||1||15||N
+InpEndHour=19||17||1||19||N

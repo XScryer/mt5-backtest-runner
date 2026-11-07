@@ -1,0 +1,6 @@
+# One .ini path per line. Consumed top to bottom; the runner pops each entry
+# as it starts it, so killing and re-launching resumes where it stopped.
+# Relative paths resolve against this file's folder.
+
+mybot-eurusd-m15.ini
+# another-test.ini

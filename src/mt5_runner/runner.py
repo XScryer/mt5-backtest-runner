@@ -221,6 +221,11 @@ def run_one(
 
     # 7. collect outputs: report file + files the expert dropped in Common\Files
     report = _resolve_report_path(ini, cfg)
+    if ini.report and report is None:
+        res.warnings.append(
+            f"Report={ini.report} was set but no report file was produced "
+            "(some MT5 builds only write reports for optimization runs)"
+        )
     if report:
         res.report = str(report)
         if report.parent != cfg.results_dir.resolve() and report.parent != cfg.results_dir:

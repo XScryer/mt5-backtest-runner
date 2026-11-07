@@ -134,6 +134,17 @@ def test_report_collected(fake_mt5, ini_dir):
     assert copied, f"report not copied into {fake_mt5.results_dir}"
 
 
+def test_report_set_but_missing_warns(fake_mt5, ini_dir, monkeypatch):
+    """Report= configured but MT5 produced nothing — must surface, not stay
+    silent (observed on real builds for single backtest runs)."""
+    monkeypatch.setenv("FAKE_MT5_NOREPORT", "1")
+    ini = write_ini(ini_dir / "nr.ini", Report=str(ini_dir / "out" / "nr"))
+    res = runner.run_one(ini, fake_mt5)
+    assert res.status == "ok"
+    assert res.report == ""
+    assert any("no report file" in w for w in res.warnings)
+
+
 def test_common_files_collected(fake_mt5, ini_dir, monkeypatch):
     monkeypatch.setenv("FAKE_MT5_COMMON", "trades.csv")
     ini = write_ini(ini_dir / "art.ini")

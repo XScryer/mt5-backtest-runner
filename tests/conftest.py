@@ -74,6 +74,7 @@ def fake_mt5(tmp_path, monkeypatch):
     for var in (
         "FAKE_MT5_RESULT", "FAKE_MT5_MODE", "FAKE_MT5_DELAY", "FAKE_MT5_HANG",
         "FAKE_MT5_NORESULT", "FAKE_MT5_COMMON", "FAKE_MT5_CRASH",
+        "FAKE_MT5_NOREPORT",
     ):
         monkeypatch.delenv(var, raising=False)
     return cfg

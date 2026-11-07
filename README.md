@@ -205,6 +205,9 @@ A note is added to `warnings` so nobody mistakes it for a single-run result.
 - Parses results from the tester log and report file. If your EA doesn't
   return anything from `OnTester()`, `on_tester` stays empty (status
   `no_result`) — the report and Common\Files artifacts are still collected.
+- `Report=` is honored when MT5 writes a file, but on some builds single
+  backtests produce no report at all — the runner warns instead of staying
+  silent.
 
 ## Development
 

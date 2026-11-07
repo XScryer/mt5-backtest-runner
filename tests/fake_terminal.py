@@ -11,6 +11,7 @@ driven by environment variables so each test can shape the run:
 * ``FAKE_MT5_HANG``       — never write a result, never exit
 * ``FAKE_MT5_NORESULT``   — write log lines but no OnTester result
 * ``FAKE_MT5_COMMON``     — filename to drop into Common\\Files (EA artefact)
+* ``FAKE_MT5_NOREPORT``   — suppress the report file (Report= set, none written)
 * ``FAKE_MT5_CRASH``      — exit(9) immediately after the log header
 
 Everything it writes mimics the real tester: UTF-16LE log with BOM, tabbed
@@ -109,7 +110,7 @@ def main() -> int:
         _append_log(log_file, [_line("QG", 0, f"OnTester result {result}")])
 
     report = vals.get("report", "")
-    if report:
+    if report and not os.environ.get("FAKE_MT5_NOREPORT"):
         rp = Path(report)
         if not rp.is_absolute():
             rp = data_dir / rp

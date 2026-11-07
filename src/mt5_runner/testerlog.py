@@ -172,12 +172,24 @@ def read_new_lines(mark: LogMark, log_dir: str | Path) -> list[str]:
         start = offset
         if size - start > MAX_READ_BYTES:
             start = size - MAX_READ_BYTES
+        # the first line is partial only when `start` does NOT sit exactly on
+        # a line boundary — check the bytes right before it
+        boundary = start <= 4
+        if not boundary:
+            back = min(2, start)
+            fh.seek(start - back)
+            prev = fh.read(back)
+            if enc == "utf-16-le":
+                boundary = prev.endswith(b"\x0a\x00") or prev.endswith(b"\x0d\x00")
+            elif enc == "utf-16-be":
+                boundary = prev.endswith(b"\x00\x0a") or prev.endswith(b"\x00\x0d")
+            else:
+                boundary = prev.endswith(b"\n") or prev.endswith(b"\r")
         fh.seek(start)
         data = fh.read()
     text = data.decode(enc, errors="replace").lstrip("\ufeff")
     lines = text.splitlines()
-    # first line may be a partial write — drop it unless we read from 0
-    if start > 0 and lines:
+    if not boundary and lines:
         lines = lines[1:]
     return [ln for ln in lines if ln.strip()]
 
@@ -193,22 +205,55 @@ def encoded_needle(needle: str, encoding: str) -> bytes:
     return needle.encode(codec, errors="ignore")
 
 
+#: Cap for the byte window the completion probe searches — the result/error
+#: lines only ever appear at the END of the run's output, so searching the
+#: whole appended region every poll would be quadratic I/O on big logs.
+_PROBE_WINDOW = 64 * 1024 * 1024
+
+
 def log_contains(mark: LogMark, log_dir: str | Path, needle: str) -> bool:
     """True when ``needle`` appears in bytes appended since ``mark`` — used to
-    detect early that a run produced its result (ShutdownTerminal absent)."""
+    detect early that a run produced its result (ShutdownTerminal absent).
+    Searches only the tail of the appended region."""
     newest = newest_log(log_dir)
     if newest is None:
         return False
     offset = mark.size if mark.path == newest else 0
     try:
+        size = newest.stat().st_size
+        if size <= offset:
+            return False
+        start = max(offset, size - _PROBE_WINDOW)
         with newest.open("rb") as fh:
             head = fh.read(4)
             enc = detect_encoding(head)
-            fh.seek(offset)
+            fh.seek(start)
             data = fh.read()
     except OSError:
         return False
     return encoded_needle(needle, enc) in data
+
+
+def log_contains_any(mark: LogMark, log_dir: str | Path, needles) -> bool:
+    """``log_contains`` for several needles — one file pass, any match."""
+    newest = newest_log(log_dir)
+    if newest is None:
+        return False
+    offset = mark.size if mark.path == newest else 0
+    try:
+        size = newest.stat().st_size
+        if size <= offset:
+            return False
+        start = max(offset, size - _PROBE_WINDOW)
+        with newest.open("rb") as fh:
+            head = fh.read(4)
+            enc = detect_encoding(head)
+            fh.seek(start)
+            data = fh.read()
+    except OSError:
+        return False
+    low = data.lower()
+    return any(encoded_needle(n, enc).lower() in low for n in needles)
 
 
 @dataclass

@@ -22,8 +22,9 @@ def sleeper_exe(tmp_path, monkeypatch):
     from conftest import _copy_python_runtime
     exe = tmp_path / FAKE_IMG
     _copy_python_runtime(sys.executable, tmp_path, FAKE_IMG)
-    # the copied interpreter needs PYTHONHOME to find the stdlib
-    monkeypatch.setenv("PYTHONHOME", str(Path(sys.executable).parent))
+    # the copied interpreter needs PYTHONHOME to find the stdlib —
+    # base_prefix is the real install even inside a venv
+    monkeypatch.setenv("PYTHONHOME", sys.base_prefix)
     return exe
 
 

@@ -14,7 +14,6 @@ have to guess which of several installs a data dir belongs to.
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,11 +47,17 @@ class Installation:
 
 def _read_origin(path: Path) -> str:
     raw = path.read_bytes()
-    for enc in ("utf-16", "utf-8-sig", "utf-8"):
+    # BOM first — a bare ASCII file of even length would decode under utf-16
+    # as CJK garbage, silently pointing at a nonexistent install dir
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16").strip()
+    for enc in ("utf-8-sig", "utf-8"):
         try:
-            return raw.decode(enc).strip()
+            text = raw.decode(enc).strip()
         except UnicodeDecodeError:
             continue
+        if text:  # sanity: an install path has a drive letter or a slash
+            return text
     return ""
 
 
@@ -125,7 +130,3 @@ def pick_installation(
     if not runnable and len(installs) == 1:
         return installs[0]
     return None
-
-
-def is_windows() -> bool:
-    return sys.platform.startswith("win") or os.name == "nt"

@@ -102,6 +102,7 @@ def source_candidates(ini: TesterIni) -> list[Path]:
     base = ini.path.parent
     candidates = [base / f"{ini.stem}.set"]
     if ini.expert_parameters:
+        candidates.append(base / ini.expert_parameters)  # as written (may nest)
         candidates.append(base / Path(ini.expert_parameters).name)
     if ini.expert:
         candidates.append(base / f"{ini.expert}.set")

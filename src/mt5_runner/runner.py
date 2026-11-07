@@ -60,7 +60,10 @@ def _resolve_report_path(ini: inifile.TesterIni, cfg: Config) -> Path | None:
     base = Path(os.path.normpath(raw))
     if not base.is_absolute():
         base = cfg.data_dir / base
-    for cand in (base.with_suffix(".htm"), base.with_suffix(".xml"), base):
+    # MT5 appends the extension to the literal name — with_suffix would eat
+    # a dot in the basename ("run.2025.01" -> "run.htm" instead of
+    # "run.2025.01.htm")
+    for cand in (Path(str(base) + ".htm"), Path(str(base) + ".xml"), base):
         if cand.is_file():
             return cand
     return None
@@ -135,6 +138,18 @@ def run_one(
     ini_path = Path(ini_path)
     res = RunResult(ini=ini_path.name, status="error")
     t0 = time.monotonic()
+    try:
+        return _run_one_inner(ini_path.resolve(), res, cfg, close_terminal)
+    except Exception as exc:  # noqa: BLE001 - the contract is "never raises"
+        res.errors.append(f"unexpected failure: {exc}")
+        res.duration_sec = round(time.monotonic() - t0, 1)
+        return res
+
+
+def _run_one_inner(
+    ini_path: Path, res: RunResult, cfg: Config, close_terminal: bool
+) -> RunResult:
+    t0 = time.monotonic()
 
     ini = inifile.parse_ini(ini_path)
     res.expert = ini.expert
@@ -162,15 +177,24 @@ def run_one(
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
     run_start_ts = time.time()
 
-    # 1. mark the log BEFORE anything else touches the terminal
-    mark = testerlog.mark_log_position(cfg.log_dir)
-
-    # 2. close any running terminal FIRST (it would clobber the staged .set)
+    # 1. close any running terminal FIRST — it would rewrite the staged .set
+    #    on exit. Path-scoped: only the configured install's terminal64.exe.
     if close_terminal:
-        found, killed = proc.close_all(cfg.process_image, cfg.close_grace_sec)
+        found, survivors = proc.close_all(
+            cfg.process_image, cfg.close_grace_sec, exe_path=cfg.terminal_exe
+        )
         if found:
-            log.info("closed %d terminal process(es)%s", found,
-                     f", {killed} force-killed" if killed else "")
+            log.info("closed %d terminal process(es), %d survived",
+                     found, survivors)
+        if survivors:
+            res.warnings.append(
+                f"{survivors} terminal process(es) could not be killed — a live "
+                "terminal may rewrite the staged .set on exit"
+            )
+
+    # 2. mark the log AFTER the close — closing a terminal appends shutdown
+    #    lines (possibly a stale 'OnTester result') that must never count as ours
+    mark = testerlog.mark_log_position(cfg.log_dir)
 
     # 3. stage parameters under the name the tester will request
     staged = setfile.stage_set(ini, cfg.profiles_dir)
@@ -281,8 +305,16 @@ def pop_queue(path: str | Path) -> str | None:
     if first is None:
         return None
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("".join(kept), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write("".join(kept))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        # queue file locked or unwritable — leave it untouched rather than
+        # lose the entry silently
+        return None
     return first
 
 

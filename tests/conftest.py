@@ -69,12 +69,14 @@ def fake_mt5(tmp_path, monkeypatch):
         terminal_args=(str(FAKE_SCRIPT),),
     )
     monkeypatch.setenv("FAKE_MT5_DATA_DIR", str(data_dir))
-    # the copied interpreter needs this to find the stdlib
-    monkeypatch.setenv("PYTHONHOME", str(Path(sys.executable).parent))
+    # the copied interpreter needs this to find the stdlib — base_prefix is
+    # the real install (correct inside a venv, unlike sys.executable.parent)
+    monkeypatch.setenv("PYTHONHOME", sys.base_prefix)
     for var in (
         "FAKE_MT5_RESULT", "FAKE_MT5_MODE", "FAKE_MT5_DELAY", "FAKE_MT5_HANG",
         "FAKE_MT5_NORESULT", "FAKE_MT5_COMMON", "FAKE_MT5_CRASH",
-        "FAKE_MT5_NOREPORT",
+        "FAKE_MT5_NOREPORT", "FAKE_MT5_NOPARAMLOG", "FAKE_MT5_NOLOG",
+        "FAKE_MT5_ERRORLINE",
     ):
         monkeypatch.delenv(var, raising=False)
     return cfg

@@ -22,6 +22,51 @@ from . import testerlog
 _IS_WINDOWS = sys.platform.startswith("win")
 
 
+def pids_for_exe(exe_path: str | Path, image_name: str) -> list[int]:
+    """PIDs running *exactly* ``exe_path`` (case-insensitive path match).
+
+    Uses CIM to get each process's ExecutablePath — needed because killing by
+    image name alone would hit EVERY MT5 install on the machine, including a
+    live trading terminal from a different broker. Falls back to image-name
+    matching only when the process table can't be queried per-path.
+    """
+    target = os.path.normpath(str(exe_path)).lower()
+    if _IS_WINDOWS:
+        try:
+            out = subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='"
+                    + image_name.replace("'", "")
+                    + "'\" | Select-Object ProcessId,ExecutablePath | ConvertTo-Csv -NoTypeInformation",
+                ],
+                capture_output=True, text=True, timeout=30,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return find_pids(image_name)
+        pids: list[int] = []
+        for row in csv.reader(StringIO(out)):
+            if len(row) >= 2 and row[0].strip().isdigit():
+                exe = row[1].strip()
+                if exe and os.path.normpath(exe).lower() == target:
+                    pids.append(int(row[0]))
+        return pids
+
+    # POSIX: compare /proc/<pid>/exe symlink
+    pids = []
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if os.path.normpath(str((entry / "exe").resolve())).lower() == target:
+                    pids.append(int(entry.name))
+            except OSError:
+                continue
+    return pids
+
+
 def find_pids(image_name: str = "terminal64.exe") -> list[int]:
     """PIDs of running processes whose executable is ``image_name``.
 
@@ -129,14 +174,27 @@ def close_pids(
                 os.kill(pid, signal.SIGKILL)
         except (OSError, subprocess.TimeoutExpired):
             pass
-    return killed
+    # verify the force-kill actually landed — a denied or still-tearing-down
+    # process would clobber the staged .set on its eventual exit
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and any(pid_alive(p) for p in killed):
+        time.sleep(0.2)
+    return [p for p in pids if pid_alive(p)]
 
 
-def close_all(image_name: str, grace_sec: float = 8.0) -> tuple[int, int]:
-    """Close every running ``image_name``. Returns (found, force_killed)."""
-    pids = find_pids(image_name)
-    killed = close_pids(pids, grace_sec)
-    return len(pids), len(killed)
+def close_all(
+    image_name: str, grace_sec: float = 8.0, exe_path: str | Path | None = None
+) -> tuple[int, int]:
+    """Close running terminals. Returns (found, still_alive).
+
+    ``exe_path`` scopes the close to one install — without it every process
+    named ``image_name`` on the machine is matched.
+    """
+    if exe_path is not None:
+        pids = pids_for_exe(exe_path, image_name)
+    else:
+        pids = find_pids(image_name)
+    return len(pids), len(close_pids(pids, grace_sec))
 
 
 def start_terminal(exe: str | Path, ini_path: str | Path, extra_args=()) -> subprocess.Popen:
@@ -174,18 +232,30 @@ def wait_for_run(
     while True:
         if proc.poll() is not None:
             return "exited"
-        if early_complete is not None and early_complete():
-            return "completed"
         if time.monotonic() >= deadline:
             return "timeout"
+        if early_complete is not None and early_complete():
+            return "completed"
         time.sleep(poll_sec)
+
+
+#: Log lines that prove a run ended even without an OnTester result — a
+#: crashed expert or a tester abort must not linger until the full timeout.
+_END_NEEDLES = (
+    "OnTester result",
+    "tester stopped",
+    "cannot load expert",
+    "cannot find expert",
+    "oninit returned non-zero",
+    "critical error",
+)
 
 
 def ontester_probe(mark: testerlog.LogMark, log_dir: str | Path):
     """Build an early-completion probe for wait_for_run: fires once the bytes
-    appended since ``mark`` contain an OnTester result."""
+    appended since ``mark`` contain a result or a fatal error line."""
 
     def probe() -> bool:
-        return testerlog.log_contains(mark, log_dir, "OnTester result")
+        return testerlog.log_contains_any(mark, log_dir, _END_NEEDLES)
 
     return probe

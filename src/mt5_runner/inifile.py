@@ -122,10 +122,11 @@ class TesterIni:
     # -- convenient accessors ------------------------------------------------
     @property
     def tester(self) -> dict[str, str]:
+        merged: dict[str, str] = {}
         for name, sec in self.sections.items():
             if name.lower() == "tester":
-                return sec
-        return {}
+                merged.update(sec)
+        return merged
 
     @property
     def stem(self) -> str:
@@ -284,25 +285,37 @@ def parse_ini(path: str | Path) -> TesterIni:
 
 
 def fix_model_line(path: str | Path) -> int | None:
-    """Rewrite the ``Model=`` line to its numeric code, in place.
-
-    Returns the new code, or None when nothing needed fixing. Everything else
-    in the file is preserved byte-for-byte.
-    """
+    """Rewrite the ``Model=`` line to its numeric code, in place, preserving
+    the file's original encoding. Returns the new code, or None when nothing
+    needed fixing."""
     path = Path(path)
-    raw = path.read_bytes()
-    bom = b""
-    if raw.startswith(b"\xef\xbb\xbf"):
-        bom, raw = raw[:3], raw[3:]
-    text = raw.decode("utf-8", errors="replace")
     ini = parse_ini(path)
     code = ini.model_code
     if code is None or (ini.model_raw.strip().isdigit() and int(ini.model_raw) == code):
         return None
-    new_text, n = re.subn(
-        rf"(?im)^\s*Model\s*=.*$", f"Model={code}", text, count=1
-    )
+
+    raw = path.read_bytes()
+    if raw.startswith(b"\xff\xfe"):
+        enc, bom = "utf-16-le", raw[:2]
+        text = raw[2:].decode("utf-16-le", errors="replace")
+    elif raw.startswith(b"\xfe\xff"):
+        enc, bom = "utf-16-be", raw[:2]
+        text = raw[2:].decode("utf-16-be", errors="replace")
+    elif raw.startswith(b"\xef\xbb\xbf"):
+        enc, bom = "utf-8", raw[:3]
+        text = raw[3:].decode("utf-8", errors="replace")
+    else:
+        enc, bom = "utf-8", b""
+        text = raw.decode("utf-8", errors="replace")
+
+    # only the Model= inside [Tester] counts — a stray key in another
+    # section must not be touched
+    m = re.search(r"(?im)^\s*\[\s*tester\s*\]\s*$", text)
+    if not m:
+        return None
+    head, body = text[: m.end()], text[m.end():]
+    body, n = re.subn(r"(?im)^\s*Model\s*=.*$", f"Model={code}", body, count=1)
     if n == 0:
         return None
-    path.write_bytes(bom + new_text.encode("utf-8"))
+    path.write_bytes(bom + (head + body).encode(enc))
     return code

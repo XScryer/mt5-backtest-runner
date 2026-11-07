@@ -58,10 +58,6 @@ class Config:
     def summary_csv(self) -> Path:
         return self.results_dir / "summary.csv"
 
-    @property
-    def runner_log(self) -> Path:
-        return self.results_dir / "runner.log"
-
 
 def _find_config_file(explicit: str | Path | None) -> Path | None:
     if explicit:
@@ -87,6 +83,23 @@ def _as_args(value) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,) if value else ()
     return tuple(str(v) for v in value)
+
+
+def _as_bool(value, default: bool) -> bool:
+    """Bool coercion that doesn't turn the string 'false' into True."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _as_float(value, default: float) -> float:
+    """Float coercion that falls back instead of crashing on bad env input."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _env(key: str) -> str | None:
@@ -128,10 +141,10 @@ def load(
         terminal_exe=_as_path(resolve("terminal_exe")),
         data_dir=_as_path(resolve("data_dir")),
         results_dir=_as_path(resolve("results_dir")) or Path("results"),
-        timeout_sec=float(resolve("timeout_sec", 5400.0)),
-        poll_sec=float(resolve("poll_sec", 5.0)),
-        close_grace_sec=float(resolve("close_grace_sec", 8.0)),
-        collect_common=bool(resolve("collect_common", True)),
+        timeout_sec=_as_float(resolve("timeout_sec"), 5400.0),
+        poll_sec=_as_float(resolve("poll_sec"), 5.0),
+        close_grace_sec=_as_float(resolve("close_grace_sec"), 8.0),
+        collect_common=_as_bool(resolve("collect_common"), True),
         process_image=str(resolve("process_image", "terminal64.exe")),
         terminal_args=_as_args(resolve("terminal_args")),
         source=(
@@ -140,6 +153,13 @@ def load(
             else ("env" if _env("terminal_exe") or _env("data_dir") else (str(cfg_path) if cfg_path else "defaults"))
         ),
     )
+
+    env_args = _env("terminal_args")
+    if env_args and " " in env_args.strip():
+        notes.append(
+            "MT5RUNNER_TERMINAL_ARGS contains spaces — it is passed as ONE "
+            "argument; use a list in mt5-runner.toml for several"
+        )
 
     # -- auto-discovery for anything still missing -----------------------------
     if cfg.terminal_exe is None or cfg.data_dir is None:
@@ -183,4 +203,7 @@ def check(cfg: Config) -> list[str]:
         problems.append(f"timeout_sec must be positive, got {cfg.timeout_sec}")
     if cfg.poll_sec <= 0:
         problems.append(f"poll_sec must be positive, got {cfg.poll_sec}")
+    rd = Path(cfg.results_dir)
+    if rd.exists() and not rd.is_dir():
+        problems.append(f"results_dir is a file, not a directory: {rd}")
     return problems

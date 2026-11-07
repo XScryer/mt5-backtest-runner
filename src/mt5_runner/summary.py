@@ -63,10 +63,3 @@ def append(path: str | Path, res: RunResult) -> None:
         if is_new:
             w.writeheader()
         w.writerow(result_row(res))
-
-
-def append_runner_log(path: str | Path, message: str) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")

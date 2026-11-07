@@ -12,6 +12,10 @@ driven by environment variables so each test can shape the run:
 * ``FAKE_MT5_NORESULT``   — write log lines but no OnTester result
 * ``FAKE_MT5_COMMON``     — filename to drop into Common\\Files (EA artefact)
 * ``FAKE_MT5_NOREPORT``   — suppress the report file (Report= set, none written)
+* ``FAKE_MT5_NOPARAMLOG`` — stage happened but the 'parameters loaded' line is
+                            omitted (tests the ran-on-defaults warning)
+* ``FAKE_MT5_NOLOG``      — write nothing at all (tests the dead-run warning)
+* ``FAKE_MT5_ERRORLINE``  — write a fatal-error log line then keep going
 * ``FAKE_MT5_CRASH``      — exit(9) immediately after the log header
 
 Everything it writes mimics the real tester: UTF-16LE log with BOM, tabbed
@@ -74,11 +78,14 @@ def main() -> int:
     ep = vals.get("expertparameters", "")
     expert = vals.get("expert", "")
     set_name = ep or (f"{expert}.set" if expert else "")
-    if set_name:
+    if set_name and not os.environ.get("FAKE_MT5_NOPARAMLOG"):
         set_path = data_dir / "MQL5" / "Profiles" / "Tester" / set_name
         if set_path.is_file():
             size = set_path.stat().st_size
             lines.append(_line("OR", 0, f"{size} bytes of tester parameters loaded"))
+
+    if os.environ.get("FAKE_MT5_ERRORLINE"):
+        lines.append(_line("ER", 3, f"cannot load expert {expert or 'EA'}"))
 
     mode = os.environ.get("FAKE_MT5_MODE", "real")
     sym, per = vals.get("symbol", "SYM"), vals.get("period", "M5")
@@ -97,7 +104,8 @@ def main() -> int:
         _append_log(log_file, lines)
         return 9
 
-    _append_log(log_file, lines)
+    if not os.environ.get("FAKE_MT5_NOLOG"):
+        _append_log(log_file, lines)
 
     if os.environ.get("FAKE_MT5_HANG"):
         while True:
@@ -105,7 +113,7 @@ def main() -> int:
 
     time.sleep(float(os.environ.get("FAKE_MT5_DELAY", "0.05")))
 
-    if not os.environ.get("FAKE_MT5_NORESULT"):
+    if not os.environ.get("FAKE_MT5_NORESULT") and not os.environ.get("FAKE_MT5_NOLOG"):
         result = os.environ.get("FAKE_MT5_RESULT", "42.5")
         _append_log(log_file, [_line("QG", 0, f"OnTester result {result}")])
 
@@ -114,7 +122,7 @@ def main() -> int:
         rp = Path(report)
         if not rp.is_absolute():
             rp = data_dir / rp
-        rp = rp.with_suffix(".htm")
+        rp = Path(str(rp) + ".htm")  # MT5 appends, never replaces suffix
         rp.parent.mkdir(parents=True, exist_ok=True)
         rp.write_text("<html><body>fake report</body></html>", encoding="utf-8")
 

@@ -62,7 +62,12 @@ def cmd_run(args) -> int:
         if not Path(args.queue).is_file():
             print(f"error: queue file not found: {args.queue}", file=sys.stderr)
             return EXIT_USAGE
-        entries.extend(runner.read_queue(args.queue))
+        # queue entries are relative to the queue file's folder, not the cwd —
+        # resolve them before validating or every relative entry reads "invalid"
+        entries.extend(
+            str(runner.resolve_queue_entry(e, args.queue))
+            for e in runner.read_queue(args.queue)
+        )
     if not entries:
         print("error: nothing to run — pass .ini files or --queue <file>", file=sys.stderr)
         return EXIT_USAGE
@@ -75,18 +80,17 @@ def cmd_run(args) -> int:
             loc = p.path.name
             print(f"{i.severity.upper():<8} {loc}: {i}", file=sys.stderr)
 
-    if args.fix:
-        for p in parsed:
+    if args.fix and not args.dry_run:
+        for idx, p in enumerate(parsed):
             code = inifile.fix_model_line(p.path)
             if code is not None:
                 print(f"fixed {p.path.name}: Model={code}")
                 # re-parse so the run sees the corrected file
-                idx = parsed.index(p)
                 parsed[idx] = inifile.parse_ini(p.path)
         fatal = [p for p in parsed if p.errors]
 
     if args.dry_run:
-        print(f"\ndry-run: {len(entries)} entr(ies), {len(fatal)} invalid")
+        print(f"\ndry-run: {len(entries)} entries, {len(fatal)} invalid")
         for p in parsed:
             mark = "INVALID" if p.errors else "ok"
             print(f"  [{mark:>7}] {p.path}")
@@ -134,10 +138,8 @@ def cmd_validate(args) -> int:
             continue
         for i in ini.issues:
             print(f"{i.severity.upper():<8} {name}: {i.message}")
-            if i.severity == "error":
+            if i.severity == "error" or (args.strict and i.severity == "warning"):
                 worst = EXIT_RUN_FAILED
-            elif i.severity == "warning" and worst == EXIT_OK:
-                worst = EXIT_OK
     return worst
 
 
@@ -250,6 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("validate", help="lint .ini files, run nothing")
     v.add_argument("inis", nargs="+")
+    v.add_argument("--strict", action="store_true",
+                   help="exit 1 on warnings too (e.g. non-numeric Model=)")
     v.set_defaults(func=cmd_validate)
 
     d = sub.add_parser("discover", help="list detected MT5 installations")

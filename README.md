@@ -33,9 +33,11 @@ queue.txt ──► validate .ini ──► close terminal ──► stage .set 
 - **Tick-mode verification** — `Model=4` (real ticks) is checked against the
   log. If MT5 fell back to simulated ticks — or real ticks had gaps — you get
   a warning in the row, not a false result.
-- **Graceful then forceful terminal handling** — closes `terminal64.exe`
-  politely first, force-kills after a grace period, handles runs that finish
-  but leave the terminal open (no `ShutdownTerminal=1`), and kills on timeout.
+- **Graceful then forceful terminal handling** — closes *the configured
+  install's* `terminal64.exe` (matched by full path — a live trading terminal
+  from another install is never touched), politely first, force-kills after a
+  grace period, handles runs that finish but leave the terminal open (no
+  `ShutdownTerminal=1`), and kills on timeout.
 - **Artifact collection** — the `.htm`/`.xml` report plus any file your EA
   wrote to `Terminal\Common\Files` during the run are copied into the results
   folder, prefixed with the run name.
@@ -80,17 +82,21 @@ Server=YourBroker-Live
 
 [Tester]
 Expert=MyBot
-ExpertParameters=mybot-eurusd-m15.set   ; name the .set will be staged as
+; the .set staged under this exact name
+ExpertParameters=mybot-eurusd-m15.set
 Symbol=EURUSD
 Period=M15
-Model=4                  ; 4 = real ticks. NUMBERS ONLY (see below)
+; 4 = real ticks — NUMBERS ONLY (see below); inline comments like this one
+; are fine on their OWN line, never after a value
+Model=4
 FromDate=2025.01.01
 ToDate=2026.01.01
 Deposit=1000
 Currency=USD
 Leverage=30
 Optimization=0
-Report=reports\mybot-eurusd-m15    ; no extension — MT5 appends .htm
+; no extension — MT5 appends .htm
+Report=reports\mybot-eurusd-m15
 ShutdownTerminal=1
 ```
 
@@ -154,13 +160,18 @@ returned) · `timeout` (killed) · `invalid` (bad .ini, never launched) ·
 ## CLI
 
 ```text
+mt5-runner [--config F] [--terminal-exe P] [--data-dir D] [-v] <command>
+
 mt5-runner run <a.ini> [b.ini ...] [--queue q.txt] [--dry-run] [--fix]
                [--force] [--timeout S] [--results-dir D]
-mt5-runner validate <a.ini> ...      lint configs, launch nothing
-mt5-runner discover [--json]         list detected MT5 installs
-mt5-runner doctor                    config + terminal readiness check
-mt5-runner init [--output F] [--force]  write mt5-runner.toml
+mt5-runner validate <a.ini> ... [--strict]   lint configs, launch nothing
+mt5-runner discover [--json]               list detected MT5 installs
+mt5-runner doctor                          config + terminal readiness check
+mt5-runner init [--output F] [--force]     write mt5-runner.toml
 ```
+
+Global flags (`--config`, `--terminal-exe`, `--data-dir`, `-v`) go **before**
+the subcommand.
 
 Config precedence: **CLI flags > `MT5RUNNER_*` env vars > `mt5-runner.toml`
 > auto-discovery**.
@@ -172,9 +183,17 @@ data_dir = "C:\\Users\\me\\AppData\\Roaming\\MetaQuotes\\Terminal\\<hash>"
 results_dir = "results"
 timeout_sec = 5400        # real-tick runs over years take a while
 poll_sec = 5
+close_grace_sec = 8       # polite-close window before force-kill
 collect_common = true     # copy files the EA writes to Terminal\Common\Files
+process_image = "terminal64.exe"
 # terminal_args = ["/portable"]
 ```
+
+Every key has an env twin in screaming snake case under `MT5RUNNER_`:
+`MT5RUNNER_TERMINAL_EXE`, `MT5RUNNER_DATA_DIR`, `MT5RUNNER_RESULTS_DIR`,
+`MT5RUNNER_TIMEOUT_SEC`, `MT5RUNNER_POLL_SEC`, `MT5RUNNER_CLOSE_GRACE_SEC`,
+`MT5RUNNER_COLLECT_COMMON`, `MT5RUNNER_PROCESS_IMAGE`,
+`MT5RUNNER_TERMINAL_ARGS` (a single argument — use the TOML list for several).
 
 ## The MT5 traps this handles
 
@@ -183,8 +202,8 @@ Each of these cost real debugging time before it became code:
 | trap | what the runner does |
 |---|---|
 | `Model=real ticks` silently means simulated | validates, warns, `--fix` rewrites to `4`, log cross-checked after |
-| `.set` written before closing a running terminal gets overwritten on exit | always **close → stage → launch** |
-| tester log is one UTF-16 file per day, multi-GB | marks byte offset before launch, streams only new lines; stale results can't leak in |
+| `.set` written before closing a running terminal gets overwritten on exit | always **close → mark log → stage → launch** — close is path-scoped to the configured install, so other MT5 terminals (e.g. live trading) are untouched |
+| tester log is one UTF-16 file per day, multi-GB | marks byte offset *after* closing any running terminal (its shutdown writes could otherwise leak in), streams only new lines; stale results can't leak in |
 | forward slashes in `/config:` make MT5 ignore `[Tester]` | path forced to native separators; "no new log output" becomes a loud warning |
 | missing `ExpertParameters`/`.set` runs on compiled-in defaults | warning before launch *and* after (`parameters loaded` line checked) |
 | terminal stays open without `ShutdownTerminal=1` | result detected in log → runner closes it itself |
@@ -216,11 +235,12 @@ pip install -e ".[dev]"
 python -m pytest
 ```
 
-122 tests, including a full end-to-end suite against a **fake terminal**: a
+149 tests, including a full end-to-end suite against a **fake terminal**: a
 renamed interpreter copy plays `terminal64.exe` (writes UTF-16 logs, reads
-the staged `.set`, lingers or hangs on command), so every trap above is
-exercised for real — ordering, timeouts, stale-result attribution, queue
-draining — without needing MT5 installed.
+the staged `.set`, lingers or hangs on command), so the traps above are
+exercised for real — ordering, timeouts, stale-result attribution,
+path-scoped kills, queue draining — without needing MT5 installed.
+Process-control tests are Windows-only; parsers/queue/config run anywhere.
 
 ## License
 

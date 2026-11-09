@@ -1,6 +1,11 @@
-# mt5-backtest-runner
+# MT5 Backtest Runner
 
 **Run MetaTrader 5 Strategy Tester backtests from the command line — queued, unattended, verified.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#requirements)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#requirements)
+[![Deps](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#requirements)
 
 The MT5 Strategy Tester is GUI-only: every run means opening the terminal,
 loading the expert, setting dates/deposit/model, waiting, then digging the

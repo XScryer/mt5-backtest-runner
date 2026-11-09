@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .inifile import TesterIni
 
@@ -90,7 +90,7 @@ def target_name(ini: TesterIni) -> str:
     """The filename the tester will look for in Profiles\\Tester."""
     ep = ini.expert_parameters
     if ep and ep.lower().endswith(".set"):
-        return Path(ep).name  # strip any directory part — MT5 ignores it anyway
+        return PureWindowsPath(ep).name  # MT5 writes Windows paths; strip the dir part on any host
     if ini.expert:
         return f"{ini.expert}.set"
     return f"{ini.stem}.set"
@@ -102,8 +102,8 @@ def source_candidates(ini: TesterIni) -> list[Path]:
     base = ini.path.parent
     candidates = [base / f"{ini.stem}.set"]
     if ini.expert_parameters:
-        candidates.append(base / ini.expert_parameters)  # as written (may nest)
-        candidates.append(base / Path(ini.expert_parameters).name)
+        candidates.append(base / Path(*PureWindowsPath(ini.expert_parameters).parts))  # as written (may nest)
+        candidates.append(base / PureWindowsPath(ini.expert_parameters).name)
     if ini.expert:
         candidates.append(base / f"{ini.expert}.set")
     # dedupe, keep order
